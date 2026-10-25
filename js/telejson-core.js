@@ -7,7 +7,7 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   'use strict';
 
-  const SCHEMA = 'telejson/v1';
+  const SCHEMA = 'telejson/v2';
   const MAX_FILE_BYTES = 25 * 1024 * 1024;
   const MAX_TOTAL_BYTES = 100 * 1024 * 1024;
   const MAX_PREVIEW_CHARS = 50000;
@@ -175,6 +175,80 @@
       }
     }
     return result;
+  }
+
+  function compactLinks(message) {
+    const source = Array.isArray(message.links) ? message.links : [];
+    const messageText = normalizeSpace(message.text);
+    const seenUrls = new Set();
+    const seenLabels = new Set();
+    const urlsWithLabels = new Set();
+    const entries = [];
+
+    function addLink(urlValue, textValue) {
+      const url = readSafeUrl(urlValue);
+      if (!url) {
+        return;
+      }
+      const label = normalizeSpace(textValue);
+      const labelVisible = !label || label === url ||
+        (messageText !== '' && messageText.includes(label));
+      if (labelVisible) {
+        if (!seenUrls.has(url)) {
+          seenUrls.add(url);
+          entries.push({ kind: 'url', value: url });
+        }
+        return;
+      }
+      const key = url + '\u0000' + label;
+      if (seenLabels.has(key)) {
+        return;
+      }
+      seenLabels.add(key);
+      urlsWithLabels.add(url);
+      entries.push({ kind: 'label', value: { url: url, text: label } });
+    }
+
+    for (const link of source) {
+      if (typeof link === 'string') {
+        addLink(link, '');
+      } else if (link && typeof link === 'object') {
+        addLink(link.url, link.text);
+      }
+    }
+
+    return entries.filter(function (entry) {
+      return entry.kind === 'label' || !urlsWithLabels.has(entry.value);
+    }).map(function (entry) {
+      return entry.value;
+    });
+  }
+
+  function finalizeMessage(message) {
+    if (message.date_iso) {
+      message.date = message.date_iso;
+      delete message.date_iso;
+    }
+    if (message.type === 'message') {
+      delete message.type;
+    }
+    if (Array.isArray(message.attachments)) {
+      for (const attachment of message.attachments) {
+        if (attachment &&
+          Object.prototype.hasOwnProperty.call(attachment, 'caption') &&
+          attachment.caption === message.text) {
+          delete attachment.caption;
+        }
+      }
+    }
+    if (Array.isArray(message.links)) {
+      const links = compactLinks(message);
+      if (links.length) {
+        message.links = links;
+      } else {
+        delete message.links;
+      }
+    }
   }
 
   function extractFromRoots(roots) {
@@ -496,7 +570,7 @@
     return path ? 'file' : null;
   }
 
-  function extractAttachments(element, text) {
+  function extractAttachments(element) {
     const attachments = [];
     const seen = new Set();
 
@@ -510,9 +584,6 @@
       }
       if ((type === 'file' || type === 'contact') && title) {
         item.name = title;
-      }
-      if (text) {
-        item.caption = text;
       }
       const key = item.type + '\u0000' + (item.path || '') + '\u0000' + (item.name || '');
       if (seen.has(key)) {
@@ -634,7 +705,7 @@
     }
 
     if (!isService) {
-      const attachments = extractAttachments(element, textInfo.text);
+      const attachments = extractAttachments(element);
       if (attachments.length) {
         data.attachments = attachments;
       }
@@ -920,6 +991,10 @@
       }
     }
 
+    for (const item of items) {
+      finalizeMessage(item.data);
+    }
+
     const messages = items.map(function (item) { return item.data; });
     const documentNode = {
       schema: SCHEMA,
@@ -933,7 +1008,7 @@
 
     const stats = {
       files: sortedParts.length,
-      messages: messages.filter(function (message) { return message.type === 'message'; }).length,
+      messages: messages.filter(function (message) { return message.type !== 'service'; }).length,
       service: messages.filter(function (message) { return message.type === 'service'; }).length,
       attachments: messages.reduce(function (total, message) {
         return total + (Array.isArray(message.attachments) ? message.attachments.length : 0);
@@ -948,6 +1023,30 @@
       stats: stats,
       warnings: warnings.slice()
     };
+  }
+
+  function utf8ByteLength(value) {
+    const text = String(value == null ? '' : value);
+    if (typeof TextEncoder !== 'undefined') {
+      return new TextEncoder().encode(text).byteLength;
+    }
+    if (typeof Buffer !== 'undefined' && typeof Buffer.byteLength === 'function') {
+      return Buffer.byteLength(text, 'utf8');
+    }
+    let bytes = 0;
+    for (const character of text) {
+      const code = character.codePointAt(0);
+      if (code <= 0x7f) {
+        bytes += 1;
+      } else if (code <= 0x7ff) {
+        bytes += 2;
+      } else if (code <= 0xffff) {
+        bytes += 3;
+      } else {
+        bytes += 4;
+      }
+    }
+    return bytes;
   }
 
   function makePreview(fullJson, limit) {
@@ -965,6 +1064,153 @@
       text: value.slice(0, end) + '\n…',
       truncated: true
     };
+  }
+
+  function makeJsonPreview(documentNode, limit) {
+    const maximum = Number.isFinite(limit) ? Math.max(0, Math.floor(limit)) : MAX_PREVIEW_CHARS;
+    let output = '';
+    let truncated = false;
+
+    function put(text) {
+      if (truncated) {
+        return;
+      }
+      const remaining = maximum - output.length;
+      if (text.length <= remaining) {
+        output += text;
+        return;
+      }
+      if (remaining > 0) {
+        output += text.slice(0, remaining);
+      }
+      truncated = true;
+    }
+
+    function writeString(value) {
+      const text = String(value);
+      put('"');
+      for (let index = 0; index < text.length && !truncated; index += 1) {
+        const code = text.charCodeAt(index);
+        const character = text.charAt(index);
+        if (character === '"' || character === '\\') {
+          put('\\' + character);
+        } else if (character === '\b') {
+          put('\\b');
+        } else if (character === '\f') {
+          put('\\f');
+        } else if (character === '\n') {
+          put('\\n');
+        } else if (character === '\r') {
+          put('\\r');
+        } else if (character === '\t') {
+          put('\\t');
+        } else if (code < 0x20) {
+          put('\\u' + code.toString(16).padStart(4, '0'));
+        } else if (code >= 0xd800 && code <= 0xdbff) {
+          const next = text.charCodeAt(index + 1);
+          if (next >= 0xdc00 && next <= 0xdfff) {
+            put(character + text.charAt(index + 1));
+            index += 1;
+          } else {
+            put('\\u' + code.toString(16).padStart(4, '0'));
+          }
+        } else if (code >= 0xdc00 && code <= 0xdfff) {
+          put('\\u' + code.toString(16).padStart(4, '0'));
+        } else {
+          put(character);
+        }
+      }
+      if (!truncated) {
+        put('"');
+      }
+    }
+
+    function writeValue(value, depth) {
+      if (truncated) {
+        return;
+      }
+      if (value === null) {
+        put('null');
+        return;
+      }
+      const type = typeof value;
+      if (type === 'string') {
+        writeString(value);
+        return;
+      }
+      if (type === 'number') {
+        put(Number.isFinite(value) ? String(value) : 'null');
+        return;
+      }
+      if (type === 'boolean') {
+        put(value ? 'true' : 'false');
+        return;
+      }
+      if (type === 'undefined' || type === 'function' || type === 'symbol') {
+        put('null');
+        return;
+      }
+      if (Array.isArray(value)) {
+        if (!value.length) {
+          put('[]');
+          return;
+        }
+        put('[\n');
+        for (let index = 0; index < value.length && !truncated; index += 1) {
+          put('  '.repeat(depth + 1));
+          writeValue(value[index], depth + 1);
+          if (index < value.length - 1 && !truncated) {
+            put(',');
+          }
+          if (!truncated) {
+            put('\n');
+          }
+        }
+        if (!truncated) {
+          put('  '.repeat(depth));
+          put(']');
+        }
+        return;
+      }
+      if (type === 'object') {
+        const keys = Object.keys(value).filter(function (key) {
+          const item = value[key];
+          return typeof item !== 'undefined' && typeof item !== 'function' &&
+            typeof item !== 'symbol';
+        });
+        if (!keys.length) {
+          put('{}');
+          return;
+        }
+        put('{\n');
+        for (let index = 0; index < keys.length && !truncated; index += 1) {
+          put('  '.repeat(depth + 1));
+          writeString(keys[index]);
+          if (!truncated) {
+            put(': ');
+          }
+          writeValue(value[keys[index]], depth + 1);
+          if (index < keys.length - 1 && !truncated) {
+            put(',');
+          }
+          if (!truncated) {
+            put('\n');
+          }
+        }
+        if (!truncated) {
+          put('  '.repeat(depth));
+          put('}');
+        }
+        return;
+      }
+      put('null');
+    }
+
+    writeValue(documentNode, 0);
+    if (truncated) {
+      output += '\n…';
+    }
+    return { text: output, truncated: truncated };
   }
 
   function makeDownloadName(chat) {
@@ -988,9 +1234,11 @@
     TeleJSONError: TeleJSONError,
     naturalCompare: naturalCompare,
     normalizeDate: normalizeDate,
+    utf8ByteLength: utf8ByteLength,
     parseExportHtml: parseExportHtml,
     buildDocument: buildDocument,
     makePreview: makePreview,
+    makeJsonPreview: makeJsonPreview,
     makeDownloadName: makeDownloadName
   };
 });

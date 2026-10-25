@@ -44,7 +44,30 @@ function byId(messages) {
   }));
 }
 
+function assertNoDuplicateFields(documentNode) {
+  for (const message of documentNode.messages) {
+    assert.equal(Object.prototype.hasOwnProperty.call(message, 'date_iso'), false);
+    assert.notEqual(message.type, 'message');
+    for (const attachment of message.attachments || []) {
+      if (Object.prototype.hasOwnProperty.call(attachment, 'caption')) {
+        assert.notEqual(attachment.caption, message.text);
+      }
+    }
+    for (const link of message.links || []) {
+      if (link && typeof link === 'object') {
+        assert.equal(typeof link.url, 'string');
+        assert.equal(typeof link.text, 'string');
+        assert.ok(link.text.length > 0);
+        assert.ok(!String(message.text || '').includes(link.text));
+      } else {
+        assert.equal(typeof link, 'string');
+      }
+    }
+  }
+}
+
 test('basic Telegram export: service, dates, text, links, reply and joined sender', function () {
+  assert.equal(core.SCHEMA, 'telejson/v2');
   const parsed = parseFixture('basic.html');
   assert.equal(parsed.title, 'Синтетический чат');
   assert.equal(parsed.titleIsGeneric, false);
@@ -78,6 +101,13 @@ test('basic Telegram export: service, dates, text, links, reply and joined sende
   assert.equal(result.document.schema, core.SCHEMA);
   assert.equal(result.document.chat, 'Синтетический чат');
   assert.equal(result.document.messages.length, 4);
+  assert.equal(result.document.messages[0].type, 'service');
+  assert.equal(result.document.messages[0].text, '1 февраля 2024');
+  const outputFirst = result.document.messages[1];
+  assert.equal(outputFirst.type, undefined);
+  assert.equal(outputFirst.date, '2024-02-01T10:05:00+03:00');
+  assert.equal(outputFirst.date_iso, undefined);
+  assert.deepEqual(outputFirst.links, ['https://example.com/page']);
   assert.equal(result.document.messages[2].sender, 'Анна');
   assert.equal(result.document.messages[3].reply_to, 1);
   assert.equal(result.stats.messages, 3);
@@ -85,6 +115,7 @@ test('basic Telegram export: service, dates, text, links, reply and joined sende
   assert.equal(result.stats.attachments, 0);
   assert.deepEqual(result.warnings, []);
   assert.equal(result.document.warnings, undefined);
+  assertNoDuplicateFields(result.document);
 });
 
 test('link without a visible label still keeps its URL', function () {
@@ -110,11 +141,12 @@ test('link without a visible label still keeps its URL', function () {
   });
   const result = core.buildDocument([{ name: 'links.html', parsed: parsed }]);
   assert.deepEqual(result.document.messages[0].links, [
-    { text: '', url: 'https://example.com/invisible' }
+    'https://example.com/invisible'
   ]);
+  assertNoDuplicateFields(result.document);
 });
 
-test('media metadata, captions and forwarded source are extracted without media contents', function () {
+test('media metadata, message text and forwarded source are extracted without media contents', function () {
   const result = build([['media.html', 'media.html']]);
   const messages = byId(result.document.messages);
 
@@ -125,23 +157,23 @@ test('media metadata, captions and forwarded source are extracted without media 
   const photo = messages.get(10);
   assert.deepEqual(photo.attachments, [{
     type: 'photo',
-    path: 'photos/photo_10.jpg',
-    caption: 'Фото с подписью'
+    path: 'photos/photo_10.jpg'
   }]);
+  assert.equal(photo.text, 'Фото с подписью');
 
   const video = messages.get(11);
   assert.deepEqual(video.attachments, [{
     type: 'video',
-    path: 'video_files/video_11.mp4',
-    caption: 'Видео'
+    path: 'video_files/video_11.mp4'
   }]);
+  assert.equal(video.text, 'Видео');
 
   const voice = messages.get(12);
   assert.deepEqual(voice.attachments, [{
     type: 'voice',
-    path: 'voice_messages/audio_12.ogg',
-    caption: 'Голосовое'
+    path: 'voice_messages/audio_12.ogg'
   }]);
+  assert.equal(voice.text, 'Голосовое');
 
   const sticker = messages.get(13);
   assert.deepEqual(sticker.attachments, [{
@@ -159,9 +191,9 @@ test('media metadata, captions and forwarded source are extracted without media 
   const audio = messages.get(15);
   assert.deepEqual(audio.attachments, [{
     type: 'audio',
-    path: 'files/song.mp3',
-    caption: 'Аудио'
+    path: 'files/song.mp3'
   }]);
+  assert.equal(audio.text, 'Аудио');
 
   const forwarded = messages.get(16);
   assert.equal(forwarded.sender, 'Борис');
@@ -169,9 +201,9 @@ test('media metadata, captions and forwarded source are extracted without media 
   assert.equal(forwarded.text, 'Пересланный текст');
   assert.deepEqual(forwarded.attachments, [{
     type: 'file',
-    name: 'forwarded.txt',
-    caption: 'Пересланный текст'
+    name: 'forwarded.txt'
   }]);
+  assertNoDuplicateFields(result.document);
 });
 
 test('forwarded source ignores the preceding forwarded userpic wrapper', function () {
@@ -303,14 +335,12 @@ test('resource-bearing synthetic markup is treated as data, not inserted content
   assert.ok(message.text.includes('ссылка'));
   assert.ok(!message.text.includes('IFRAME_FALLBACK'));
   assert.ok(!message.text.includes('OBJECT_FALLBACK'));
-  assert.deepEqual(message.links, [
-    { text: 'ссылка', url: 'https://example.com/safe' }
-  ]);
+  assert.deepEqual(message.links, ['https://example.com/safe']);
   assert.deepEqual(message.attachments, [{
     type: 'photo',
-    path: 'https://resources.invalid/photo.jpg',
-    caption: message.text
+    path: 'https://resources.invalid/photo.jpg'
   }]);
+  assertNoDuplicateFields(result.document);
 });
 
 test('HTML is inert and unsafe links/scripts do not enter the JSON', function () {
@@ -333,9 +363,11 @@ test('HTML is inert and unsafe links/scripts do not enter the JSON', function ()
     assert.ok(message.text.includes('опасная и безопасная'));
     assert.ok(!message.text.includes('script'));
     assert.deepEqual(message.links, [
-      { text: 'безопасная', url: 'https://example.com/?a=1&b=2' }
+      'https://example.com/?a=1&b=2'
     ]);
     assert.ok(!JSON.stringify(result.document).includes('<script>'));
+    assert.ok(!JSON.stringify(result.document).includes('javascript:'));
+    assertNoDuplicateFields(result.document);
   } finally {
     xssDom.window.close();
   }
@@ -374,6 +406,88 @@ test('date normalization keeps the original offset and warns about non-ISO fallb
   assert.ok(parsed.warnings.some(function (warning) {
     return warning.includes('нормализовать даты');
   }));
+
+  const result = core.buildDocument([{ name: 'dates.html', parsed: parsed }]);
+  assert.equal(result.document.messages[0].date, '07.08.2024 15:00:00');
+  assert.equal(result.document.messages[0].date_iso, undefined);
+  assert.ok(result.warnings.some(function (warning) {
+    return warning.includes('нормализовать даты');
+  }));
+});
+
+test('output removes duplicate caption/date/type and keeps unique labels and captions', function () {
+  const parsed = parseFixture('basic.html');
+  const target = parsed.messages[1].data;
+  target.text = 'Текст с видимой ссылкой';
+  target.attachments = [
+    { type: 'photo', path: 'photos/duplicate.jpg', caption: target.text },
+    { type: 'file', name: 'unique.pdf', caption: 'Уникальная подпись' }
+  ];
+  target.links = [
+    { text: 'видимой', url: 'https://example.com/page' },
+    { text: '', url: 'https://example.com/page' },
+    { text: 'уникальный ярлык', url: 'https://example.com/unique' },
+    { text: 'второй уникальный ярлык', url: 'https://example.com/unique' },
+    { text: '', url: 'https://example.com/unique' },
+    { text: '', url: 'https://example.com/invisible' }
+  ];
+
+  const result = core.buildDocument([{ name: 'basic.html', parsed: parsed }]);
+  const message = result.document.messages.find(function (item) {
+    return item.id === 1;
+  });
+
+  assert.equal(message.type, undefined);
+  assert.equal(message.date, '2024-02-01T10:05:00+03:00');
+  assert.equal(message.date_iso, undefined);
+  assert.equal(message.attachments[0].caption, undefined);
+  assert.equal(message.attachments[1].caption, 'Уникальная подпись');
+  assert.deepEqual(message.links, [
+    'https://example.com/page',
+    { url: 'https://example.com/unique', text: 'уникальный ярлык' },
+    { url: 'https://example.com/unique', text: 'второй уникальный ярлык' },
+    'https://example.com/invisible'
+  ]);
+  assertNoDuplicateFields(result.document);
+});
+
+test('compact serialization has no pretty whitespace and sizes use UTF-8 bytes', function () {
+  const result = build([['basic.html', 'basic.html']]);
+  const compact = JSON.stringify(result.document);
+  const pretty = JSON.stringify(result.document, null, 2);
+
+  assert.ok(!compact.includes('\n'));
+  assert.ok(core.utf8ByteLength(compact) < core.utf8ByteLength(pretty));
+  assert.equal(core.utf8ByteLength('Привет'), 12);
+  assert.equal(core.utf8ByteLength('😀'), 4);
+  assert.equal(core.utf8ByteLength(compact), Buffer.byteLength(compact, 'utf8'));
+});
+
+test('preview is bounded and pretty without serializing the whole document', function () {
+  const documentNode = {
+    schema: 'telejson/v2',
+    messages: Array.from({ length: 300 }, function (_, index) {
+      return {
+        id: index + 1,
+        date: '2025-05-01T09:00:00+03:00',
+        text: 'Синтетический текст для проверки предпросмотра. '.repeat(8)
+      };
+    })
+  };
+  const full = JSON.stringify(documentNode, null, 2);
+  assert.ok(full.length > core.MAX_PREVIEW_CHARS);
+
+  const preview = core.makeJsonPreview(documentNode, core.MAX_PREVIEW_CHARS);
+  assert.equal(preview.truncated, true);
+  assert.ok(preview.text.length <= core.MAX_PREVIEW_CHARS + 2);
+  assert.ok(preview.text.startsWith('{\n  "schema": "telejson/v2"'));
+  assert.ok(preview.text.endsWith('\n…'));
+
+  const small = { ok: true, nested: [1, 2] };
+  assert.deepEqual(core.makeJsonPreview(small, 1000), {
+    text: JSON.stringify(small, null, 2),
+    truncated: false
+  });
 });
 
 test('preview is bounded and download names are filesystem-safe', function () {
@@ -481,17 +595,70 @@ test('index.html loads through file:// and renders the built-in synthetic exampl
     }, 10000);
 
     const preview = documentNode.getElementById('preview').textContent;
-    assert.ok(preview.includes('"schema": "telejson/v1"'));
+    assert.ok(preview.includes('"schema": "telejson/v2"'));
     assert.ok(preview.includes('"chat": "Демо-чат TeleJSON"'));
+    assert.ok(preview.includes('"date": "2025-05-01T09:00:00+03:00"'));
     assert.ok(preview.includes('"reply_to": 1'));
     assert.ok(preview.includes('"forwarded_from": "Канал примеров"'));
+    assert.ok(preview.includes('"type": "service"'));
+    assert.ok(!preview.includes('"date_iso"'));
+    assert.ok(!preview.includes('"caption"'));
+    assert.ok(!preview.includes('"type": "message"'));
     assert.ok(documentNode.getElementById('warnings-section').hidden);
     assert.match(documentNode.getElementById('status').textContent, /^Готово/);
     assert.equal(documentNode.querySelectorAll('#stats .stat').length, 5);
+
+    const summary = documentNode.getElementById('result-summary').textContent;
+    assert.match(summary, /Компактный JSON/);
+    assert.match(summary, /UTF-8/);
+    assert.match(summary, /HTML/);
+    assert.match(summary, /B/);
+    assert.ok(documentNode.querySelector('.download-note').textContent.includes('без отступов'));
+
+    let capturedBlob = null;
+    let capturedDownload = null;
+    dom.window.URL.createObjectURL = function (blob) {
+      capturedBlob = blob;
+      return 'blob:telejson-test';
+    };
+    dom.window.URL.revokeObjectURL = function () {};
+    dom.window.HTMLAnchorElement.prototype.click = function () {
+      capturedDownload = this.download;
+    };
+
+    documentNode.getElementById('download-button').click();
+    await waitFor(function () {
+      return Boolean(capturedBlob);
+    }, 1000);
+
+    const compact = await readBlob(dom.window, capturedBlob);
+    assert.ok(!compact.includes('\n'));
+    const parsed = JSON.parse(compact);
+    assert.equal(parsed.schema, 'telejson/v2');
+    assertNoDuplicateFields(parsed);
+    assert.ok(capturedDownload && capturedDownload.endsWith('.json'));
+
+    const expectedBytes = Buffer.byteLength(compact, 'utf8');
+    const formattedBytes = new Intl.NumberFormat('ru-RU').format(expectedBytes);
+    assert.ok(summary.includes(formattedBytes + ' B UTF-8'));
+    assert.match(documentNode.getElementById('status').textContent, /^Компактный JSON/);
   } finally {
     dom.window.close();
   }
 });
+
+function readBlob(windowNode, blob) {
+  return new Promise(function (resolve, reject) {
+    const reader = new windowNode.FileReader();
+    reader.onload = function () {
+      resolve(String(reader.result || ''));
+    };
+    reader.onerror = function () {
+      reject(reader.error || new Error('blob read failed'));
+    };
+    reader.readAsText(blob, 'utf-8');
+  });
+}
 
 function waitFor(predicate, timeoutMs) {
   return new Promise(function (resolve, reject) {

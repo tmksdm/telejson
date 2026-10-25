@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' file:; script-src-attr 'none'; style-src 'self' file:; style-src-elem 'self' file:; style-src-attr 'unsafe-inline'; img-src 'none'; font-src 'none'; connect-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; worker-src 'none'; manifest-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="TeleJSON — локальное преобразование HTML-экспорта Telegram Desktop в JSON для нейросетей. Без сервера и отправки данных.">
+  <meta name="description" content="TeleJSON — локальное преобразование HTML-экспорта Telegram Desktop в компактный JSON для нейросетей. Без сервера и отправки данных.">
   <title>TeleJSON — Telegram HTML в JSON</title>
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -18,7 +18,7 @@
         <div>
           <p class="eyebrow">Локальный конвертер</p>
           <h1>TeleJSON</h1>
-          <p class="tagline">HTML-экспорт Telegram → читаемый JSON для нейросетей</p>
+          <p class="tagline">HTML-экспорт Telegram → компактный JSON для нейросетей</p>
         </div>
       </div>
       <span class="privacy-badge">Данные не покидают устройство</span>
@@ -72,11 +72,11 @@
       </article>
       <article class="info-card">
         <h2>Медиа не распознаются</h2>
-        <p>Содержимое фото, видео, голосовых и файлов не читается. В JSON попадают только тип, относительный путь, название файла и подпись, если они есть в HTML.</p>
+        <p>Содержимое фото, видео, голосовых и файлов не читается. В JSON попадают только тип, относительный путь и название файла. Подпись не дублируется, если она уже есть в тексте сообщения.</p>
       </article>
       <article class="info-card">
         <h2>Что сохраняется</h2>
-        <p>Название чата, даты с часовым поясом, отправители, текст с переносами и emoji, ссылки, ответы, пересылки, вложения и служебные события.</p>
+        <p>Название чата, одна дата (ISO с часовым поясом, когда её можно нормализовать), отправители, текст с переносами и emoji, ссылки без повторения видимого текста, ответы, пересылки, вложения и служебные события.</p>
       </article>
     </section>
 
@@ -111,7 +111,7 @@
         <span id="preview-note" class="preview-note"></span>
       </div>
       <pre id="preview" class="preview" tabindex="0" aria-label="Предпросмотр JSON"></pre>
-      <p class="download-note">Скачивается полный JSON в UTF-8 с отступами. Предпросмотр ограничен, чтобы не нагружать интерфейс.</p>
+      <p class="download-note">Скачивается полный компактный JSON в UTF-8 без отступов. Подписи, совпадающие с текстом, отдельное поле date_iso и type обычных сообщений не дублируются; ссылки сохраняются без повторения видимого текста. Предпросмотр ограничен 50 000 символами, размер указан в байтах UTF-8.</p>
     </section>
 
     <noscript>
@@ -124,7 +124,7 @@
 
   <footer class="site-footer">
     <div class="wrap">
-      <span>TeleJSON · схема <code>telejson/v1</code></span>
+      <span>TeleJSON · схема <code>telejson/v2</code></span>
       <span>Обработка только в браузере</span>
     </div>
   </footer>

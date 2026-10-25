@@ -7,6 +7,8 @@
   const state = {
     busy: false,
     fullJson: '',
+    inputBytes: 0,
+    outputBytes: 0,
     document: null,
     stats: null,
     warnings: [],
@@ -195,6 +197,7 @@
     const sources = files.map(function (file) {
       return {
         name: file.name,
+        byteLength: file.size,
         getText: function () { return readFileText(file); }
       };
     });
@@ -215,6 +218,7 @@
     const sources = example.files.map(function (file) {
       return {
         name: file.name,
+        byteLength: Core.utf8ByteLength(file.html),
         getText: function () { return file.html; }
       };
     });
@@ -239,6 +243,7 @@
 
     try {
       const parts = [];
+      let inputBytes = 0;
 
       for (let index = 0; index < ordered.length; index += 1) {
         const source = ordered[index];
@@ -258,6 +263,10 @@
           );
         }
 
+        inputBytes += Number.isFinite(source.byteLength)
+          ? source.byteLength
+          : Core.utf8ByteLength(html);
+
         setStatus('Разбор ' + position);
         await nextFrame();
 
@@ -273,8 +282,10 @@
       await nextFrame();
 
       const result = Core.buildDocument(parts);
-      const fullJson = JSON.stringify(result.document, null, 2);
-      renderResult(result, fullJson, meta || {});
+      const compactJson = JSON.stringify(result.document);
+      renderResult(result, compactJson, Object.assign({}, meta || {}, {
+        inputBytes: inputBytes
+      }));
     } catch (error) {
       showError(
         error && error.message ? error.message : 'Не удалось обработать файлы.',
@@ -301,19 +312,22 @@
     });
   }
 
-  function renderResult(result, fullJson, meta) {
-    state.fullJson = fullJson;
+  function renderResult(result, compactJson, meta) {
+    const outputBytes = Core.utf8ByteLength(compactJson);
+    state.fullJson = compactJson;
+    state.inputBytes = Number(meta.inputBytes) || 0;
+    state.outputBytes = outputBytes;
     state.document = result.document;
     state.stats = result.stats;
     state.warnings = result.warnings.slice();
     state.fileName = Core.makeDownloadName(result.document.chat);
 
-    const preview = Core.makePreview(fullJson, Core.MAX_PREVIEW_CHARS);
+    const preview = Core.makeJsonPreview(result.document, Core.MAX_PREVIEW_CHARS);
     elements.preview.textContent = preview.text;
     elements.previewNote.textContent = preview.truncated
-      ? 'Показаны первые ' + formatNumber(Core.MAX_PREVIEW_CHARS) + ' из ' +
-        formatNumber(fullJson.length) + ' символов'
-      : 'Полный JSON · ' + formatNumber(fullJson.length) + ' символов';
+      ? 'Предпросмотр: первые ' + formatNumber(Core.MAX_PREVIEW_CHARS) +
+        ' символов · скачиваемый JSON: ' + formatByteCount(outputBytes) + ' UTF-8'
+      : 'Полный JSON · ' + formatByteCount(outputBytes) + ' UTF-8 · скачивается компактным';
 
     renderStats(result.stats);
     renderWarnings(result.warnings);
@@ -322,12 +336,22 @@
     if (meta.example) {
       summary.push('Синтетический пример');
     }
+    summary.push('Компактный JSON');
     summary.push('Файлов: ' + formatNumber(result.stats.files));
     summary.push('Сообщений: ' + formatNumber(result.stats.messages));
     if (result.stats.service) {
       summary.push('Служебных: ' + formatNumber(result.stats.service));
     }
     summary.push('Вложений: ' + formatNumber(result.stats.attachments));
+    if (state.inputBytes > 0) {
+      const savedBytes = state.inputBytes - outputBytes;
+      const savedPercent = (savedBytes / state.inputBytes) * 100;
+      summary.push('JSON: ' + formatByteCount(outputBytes) + ' UTF-8');
+      summary.push('HTML: ' + formatByteCount(state.inputBytes));
+      summary.push(
+        (savedBytes >= 0 ? '−' : '+') + formatPercent(Math.abs(savedPercent)) + ' к HTML'
+      );
+    }
     elements.resultSummary.textContent = summary.join(' · ');
     elements.result.hidden = false;
     elements.downloadButton.disabled = false;
@@ -335,7 +359,8 @@
     const statusLabel = 'Сообщений: ' + formatNumber(result.stats.messages) +
       '. Служебных: ' + formatNumber(result.stats.service) +
       '. Вложений: ' + formatNumber(result.stats.attachments) +
-      '. Файлов: ' + formatNumber(result.stats.files) + '.';
+      '. Файлов: ' + formatNumber(result.stats.files) +
+      '. JSON: ' + formatByteCount(outputBytes) + ' UTF-8.';
     setStatus(
       result.warnings.length
         ? 'Готово с предупреждениями. ' + statusLabel
@@ -394,7 +419,7 @@
     }
 
     try {
-      const blob = new Blob([state.fullJson + '\n'], {
+      const blob = new Blob([state.fullJson], {
         type: 'application/json;charset=utf-8'
       });
       const url = URL.createObjectURL(blob);
@@ -409,7 +434,9 @@
       window.setTimeout(function () {
         URL.revokeObjectURL(url);
       }, 2000);
-      setStatus('Файл ' + state.fileName + ' подготовлен для скачивания.');
+      setStatus(
+        'Компактный JSON (' + formatByteCount(state.outputBytes) + ' UTF-8) подготовлен для скачивания.'
+      );
     } catch (error) {
       showError(
         'Не удалось подготовить файл для скачивания: ' +
@@ -433,6 +460,8 @@
 
   function clearOutput() {
     state.fullJson = '';
+    state.inputBytes = 0;
+    state.outputBytes = 0;
     state.document = null;
     state.stats = null;
     state.warnings = [];
@@ -489,6 +518,14 @@
   function formatBytes(bytes) {
     const megabytes = bytes / (1024 * 1024);
     return (Number.isInteger(megabytes) ? String(megabytes) : megabytes.toFixed(1)) + ' МБ';
+  }
+
+  function formatByteCount(bytes) {
+    return formatNumber(bytes) + ' B';
+  }
+
+  function formatPercent(value) {
+    return numberFormatter.format(Math.round(Number(value) * 10) / 10) + ' %';
   }
 
   function formatNumber(value) {
