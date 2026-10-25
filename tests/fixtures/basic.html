@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Exported Data</title>
+</head>
+<body>
+  <div class="page_wrap">
+    <div class="page_header">
+      <div class="content"><div class="text bold">Синтетический чат</div></div>
+    </div>
+    <div class="page_body chat_page">
+      <div class="history">
+        <div class="message service" id="message-1">
+          <div class="body details">1 февраля 2024</div>
+        </div>
+        <div class="message default clearfix" id="message1">
+          <div class="body">
+            <div class="pull_right date details" title="01.02.2024 10:05:00 UTC+03:00">10:05</div>
+            <div class="from_name">Анна</div>
+            <div class="text">Привет!<br>Вторая строка 😀<br><code>const x = 1;</code><blockquote>Цитата</blockquote>Ссылка: <a href="https://example.com/page">пример</a></div>
+          </div>
+        </div>
+        <div class="message default clearfix joined" id="message2">
+          <div class="body">
+            <div class="pull_right date details" title="01.02.2024 10:06:00 UTC+03:00">10:06</div>
+            <div class="text">Ещё сообщение</div>
+          </div>
+        </div>
+        <div class="message default clearfix" id="message3">
+          <div class="body">
+            <div class="pull_right date details" title="01.02.2024 10:07:00 UTC+03:00">10:07</div>
+            <div class="from_name">Борис</div>
+            <div class="reply_to details">In reply to <a href="#go_to_message1" onclick="return GoToMessage(1)">this message</a></div>
+            <div class="text">Отвечаю на первое.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' file:; script-src-attr 'none'; style-src 'self' file:; style-src-elem 'self' file:; style-src-attr 'unsafe-inline'; img-src 'none'; font-src 'none'; connect-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; worker-src 'none'; manifest-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="TeleJSON — локальное преобразование HTML-экспорта Telegram Desktop в JSON для нейросетей. Без сервера и отправки данных.">
+  <title>TeleJSON — Telegram HTML в JSON</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">К содержимому</a>
+
+  <header class="site-header">
+    <div class="wrap header-inner">
+      <div class="brand">
+        <div class="logo" aria-hidden="true">TJ</div>
+        <div>
+          <p class="eyebrow">Локальный конвертер</p>
+          <h1>TeleJSON</h1>
+          <p class="tagline">HTML-экспорт Telegram → читаемый JSON для нейросетей</p>
+        </div>
+      </div>
+      <span class="privacy-badge">Данные не покидают устройство</span>
+    </div>
+  </header>
+
+  <main id="main" class="wrap">
+    <section class="card import-card" aria-labelledby="import-title">
+      <div class="section-head">
+        <div>
+          <p class="step">01 · Импорт</p>
+          <h2 id="import-title">Выберите файлы экспорта</h2>
+          <p class="section-lead">Подойдут <code>messages.html</code>, <code>messages2.html</code> и следующие части одного чата.</p>
+        </div>
+        <button id="example-button" class="button secondary" type="button">Синтетический пример</button>
+      </div>
+
+      <div id="dropzone" class="dropzone" role="button" tabindex="0" aria-describedby="drop-hint">
+        <span class="drop-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 16V4"></path>
+            <path d="m7 9 5-5 5 5"></path>
+            <path d="M5 20h14"></path>
+          </svg>
+        </span>
+        <span class="drop-copy">
+          <strong>Перетащите .html или .htm сюда</strong>
+          <span id="drop-hint">или нажмите, чтобы выбрать файлы. Можно несколько частей одного экспорта.</span>
+        </span>
+        <span class="button primary" aria-hidden="true">Выбрать файлы</span>
+      </div>
+      <input id="file-input" class="visually-hidden" type="file" accept=".html,.htm,text/html" aria-label="HTML-файлы экспорта Telegram" multiple>
+
+      <p class="limit-note">Ограничения: до <span data-limit-file>25 МБ</span> на файл и <span data-limit-total>100 МБ</span> суммарно. Один чат за раз.</p>
+
+      <div class="statusbar">
+        <p id="status" class="status" role="status" aria-live="polite">Файлы не выбраны.</p>
+        <progress id="progress" max="1" value="0" aria-label="Прогресс обработки" hidden></progress>
+      </div>
+      <div id="error" class="error-box" role="alert" hidden></div>
+    </section>
+
+    <section class="info-grid" aria-label="Что важно знать">
+      <article class="info-card">
+        <h2>Локально и офлайн</h2>
+        <p>Файлы читаются в этой вкладке и не загружаются на сервер. При обработке нет сетевых запросов и аналитики. <code>index.html</code> работает и при открытии напрямую с диска.</p>
+      </article>
+      <article class="info-card">
+        <h2>HTML не исполняется</h2>
+        <p><code>DOMParser</code> создаёт изолированный документ: скрипты не исполняются, разобранный HTML не вставляется в страницу, а данные выводятся только через <code>textContent</code>. Внешние загрузки блокирует CSP.</p>
+      </article>
+      <article class="info-card">
+        <h2>Медиа не распознаются</h2>
+        <p>Содержимое фото, видео, голосовых и файлов не читается. В JSON попадают только тип, относительный путь, название файла и подпись, если они есть в HTML.</p>
+      </article>
+      <article class="info-card">
+        <h2>Что сохраняется</h2>
+        <p>Название чата, даты с часовым поясом, отправители, текст с переносами и emoji, ссылки, ответы, пересылки, вложения и служебные события.</p>
+      </article>
+    </section>
+
+    <section id="warnings-section" class="card warnings-card" aria-labelledby="warnings-title" hidden>
+      <div class="section-head">
+        <div>
+          <p class="step">Проверка</p>
+          <h2 id="warnings-title">Предупреждения</h2>
+        </div>
+        <span id="warnings-count" class="pill"></span>
+      </div>
+      <ul id="warnings-list" class="warning-list"></ul>
+    </section>
+
+    <section id="result" class="card result-card" aria-labelledby="result-title" hidden>
+      <div class="section-head">
+        <div>
+          <p class="step">02 · Результат</p>
+          <h2 id="result-title">Готовый JSON</h2>
+          <p id="result-summary" class="section-lead"></p>
+        </div>
+        <div class="actions">
+          <button id="download-button" class="button primary" type="button">Скачать JSON</button>
+          <button id="reset-button" class="button secondary" type="button">Сбросить</button>
+        </div>
+      </div>
+
+      <div id="stats" class="stats" aria-label="Статистика экспорта"></div>
+
+      <div class="preview-bar">
+        <h3>Предпросмотр JSON</h3>
+        <span id="preview-note" class="preview-note"></span>
+      </div>
+      <pre id="preview" class="preview" tabindex="0" aria-label="Предпросмотр JSON"></pre>
+      <p class="download-note">Скачивается полный JSON в UTF-8 с отступами. Предпросмотр ограничен, чтобы не нагружать интерфейс.</p>
+    </section>
+
+    <noscript>
+      <section class="card">
+        <h2>Нужен JavaScript</h2>
+        <p>TeleJSON полностью работает в браузере, но для чтения и разбора файлов требуется включённый JavaScript.</p>
+      </section>
+    </noscript>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap">
+      <span>TeleJSON · схема <code>telejson/v1</code></span>
+      <span>Обработка только в браузере</span>
+    </div>
+  </footer>
+
+  <script defer src="js/telejson-core.js"></script>
+  <script defer src="js/example.js"></script>
+  <script defer src="js/app.js"></script>
+</body>
+</html>
